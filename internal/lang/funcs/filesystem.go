@@ -58,6 +58,16 @@ func MakeFileFunc(baseDir string, encBase64 bool) function.Function {
 	})
 }
 
+const TemplateMaxRecursionDepth = 1024
+
+type ErrorTemplateRecursionLimit struct {
+	source string
+}
+
+func (err ErrorTemplateRecursionLimit) Error() string {
+	return fmt.Sprintf("max recursion depth limit reached in " + err.source)
+}
+
 // MakeTemplateFileFunc constructs a function that takes a file path and
 // an arbitrary object of named values and attempts to render the referenced
 // file as a template using HCL template syntax.
@@ -68,10 +78,12 @@ func MakeFileFunc(baseDir string, encBase64 bool) function.Function {
 // those variables provided in the second function argument, to ensure that all
 // dependencies on other graph nodes can be seen before executing this function.
 //
-// As a special exception, a referenced template file may not recursively call
-// the templatefile function, since that would risk the same file being
-// included into itself indefinitely.
+// As a special exception, a referenced template file may call the templatefile
+// function, with a recursion depth limit providing an error when reached
 func MakeTemplateFileFunc(baseDir string, funcsCb func() map[string]function.Function) function.Function {
+	return makeTemplateFileFuncImpl(baseDir, funcsCb, 0)
+}
+func makeTemplateFileFuncImpl(baseDir string, funcsCb func() map[string]function.Function, depth int) function.Function {
 
 	params := []function.Parameter{
 		{
@@ -86,6 +98,10 @@ func MakeTemplateFileFunc(baseDir string, funcsCb func() map[string]function.Fun
 	}
 
 	loadTmpl := func(fn string, marks cty.ValueMarks) (hcl.Expression, error) {
+		if depth > TemplateMaxRecursionDepth {
+			return nil, ErrorTemplateRecursionLimit{fn}
+		}
+
 		// We re-use File here to ensure the same filename interpretation
 		// as it does, along with its other safety checks.
 		tmplVal, err := File(baseDir, cty.StringVal(fn).WithMarks(marks))
@@ -138,13 +154,8 @@ func MakeTemplateFileFunc(baseDir string, funcsCb func() map[string]function.Fun
 		funcs := make(map[string]function.Function, len(givenFuncs))
 		for name, fn := range givenFuncs {
 			if name == "templatefile" {
-				// We stub this one out to prevent recursive calls.
-				funcs[name] = function.New(&function.Spec{
-					Params: params,
-					Type: func(args []cty.Value) (cty.Type, error) {
-						return cty.NilType, fmt.Errorf("cannot recursively call templatefile from inside templatefile call")
-					},
-				})
+				// Increment the recursion depth counter
+				funcs[name] = makeTemplateFileFuncImpl(baseDir, funcsCb, depth+1)
 				continue
 			}
 			funcs[name] = fn
@@ -153,6 +164,17 @@ func MakeTemplateFileFunc(baseDir string, funcsCb func() map[string]function.Fun
 
 		val, diags := expr.Value(ctx)
 		if diags.HasErrors() {
+			for _, diag := range diags {
+				// Roll up recursive errors
+				if extra, ok := diag.Extra.(hclsyntax.FunctionCallDiagExtra); ok {
+					if extra.CalledFunctionName() == "templatefile" {
+						err := extra.FunctionCallError()
+						if err, ok := err.(ErrorTemplateRecursionLimit); ok {
+							return cty.DynamicVal, ErrorTemplateRecursionLimit{err.source + ", " + diag.Subject.String()}
+						}
+					}
+				}
+			}
 			return cty.DynamicVal, diags
 		}
 		return val, nil
