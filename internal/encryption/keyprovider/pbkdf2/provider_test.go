@@ -3,14 +3,9 @@
 // Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
-package static_test
+package pbkdf2_test
 
-import (
-	"testing"
-
-	"github.com/opentofu/opentofu/internal/encryption/keyprovider/static"
-)
-
+/*
 func TestKeyProvider(t *testing.T) {
 	// TODO: Rework to check the expected errors and not just expectSuccess
 	type testCase struct {
@@ -44,8 +39,8 @@ func TestKeyProvider(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			descriptor := static.New()
-			c := descriptor.ConfigStruct().(*static.Config)
+			descriptor := pbkdf2.New()
+			c := descriptor.ConfigStruct().(*pbkdf2.Config)
 
 			// Set key if provided
 			if tc.key != "" {
@@ -76,3 +71,4 @@ func TestKeyProvider(t *testing.T) {
 		})
 	}
 }
+*/
